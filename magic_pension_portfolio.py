@@ -8,8 +8,21 @@ from datetime import datetime
 st.set_page_config(
     page_title="김성일 마법의 연금굴리기 포트폴리오",
     page_icon="💰",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"  # 사이드바 숨김
 )
+
+# 사이드바 완전히 숨기기 (CSS)
+st.markdown("""
+    <style>
+        [data-testid="stSidebar"] {
+            display: none;
+        }
+        .stApp > header {
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # 포트폴리오 구성 정보
 PORTFOLIO_CONFIG = {
@@ -352,17 +365,19 @@ if st.session_state.total_balance > 0:
         group_tickers = weight_groups.get(group, [])
         is_grouped = len(group_tickers) > 1
         
-        # 비중 업데이트 (그룹 내 첫 번째 종목만, 두 번째 종목은 무시)
+        # 비중 업데이트 (그룹 내 첫 번째 종목만 수정 가능, 두 종목 합산이 그룹 비중)
         new_weight = row['비중 조절 가능'] / 100.0  # 퍼센트를 소수로 변환
         if is_grouped:
             # 그룹의 첫 번째 티커인 경우만 비중 업데이트
+            # 이 비중은 그룹 전체 비중 (두 종목 합산 목표)
             if ticker == group_tickers[0]:
                 st.session_state.adjustable_weights[ticker] = new_weight
                 # 그룹 내 다른 티커들은 0으로 설정 (그룹 비중은 첫 번째 티커에만 저장)
+                # 실제 계산 시 두 종목의 구매금액 합계가 이 비중에 맞춰짐
                 for t in group_tickers[1:]:
                     st.session_state.adjustable_weights[t] = 0.0
-            # 그룹 내 두 번째 이후 종목의 비중 변경은 완전히 무시
-            # (첫 번째 종목의 비중이 그룹 전체 비중을 결정)
+            # 그룹 내 두 번째 이후 종목의 비중 변경은 무시
+            # (첫 번째 종목의 비중이 그룹 전체 비중을 결정, 두 종목 합산 목표)
         else:
             st.session_state.adjustable_weights[ticker] = new_weight
         
@@ -409,13 +424,15 @@ if st.session_state.total_balance > 0:
     with col4:
         st.metric("수익률", f"{profit_rate:.2f}%")
     
-    # 그룹별 구매금액 합계
+    # 그룹별 구매금액 합계 확인 (두 종목 합산이 그룹 비중에 맞는지)
     if group_target_values:
         st.markdown("---")
-        st.subheader("📊 그룹별 구매금액 합계")
+        st.subheader("📊 그룹별 구매금액 합계 확인")
+        st.info("💡 **그룹별 합산**: 선진국(KODEX + ACE)과 금(TIGER + ACE)은 두 종목의 구매금액 합계가 목표 비중에 맞춰집니다.")
         group_summary_data = []
         for group, tickers in weight_groups.items():
             if len(tickers) > 1:
+                # 그룹 내 두 종목의 구매금액 합계
                 group_purchase = sum([
                     st.session_state.purchase_quantities.get(ticker, 0) * prices.get(ticker, 0)
                     for ticker in tickers
@@ -425,13 +442,20 @@ if st.session_state.total_balance > 0:
                 group_target_weight = group_target_value / total_balance * 100 if total_balance > 0 else 0
                 group_actual_weight = group_purchase / total_balance * 100 if total_balance > 0 else 0
                 
+                # 각 종목별 구매금액
+                ticker_details = []
+                for ticker in tickers:
+                    ticker_purchase = st.session_state.purchase_quantities.get(ticker, 0) * prices.get(ticker, 0) if prices.get(ticker, 0) else 0
+                    ticker_details.append(f"{PORTFOLIO_FLAT[ticker]['name']}: ₩{ticker_purchase:,.0f}")
+                
                 group_summary_data.append({
                     "그룹": group,
                     "목표 비중": f"{group_target_weight:.2f}%",
                     "목표 금액": f"₩ {group_target_value:,.0f}",
                     "실제 구매금액 합계": f"₩ {group_purchase:,.0f}",
                     "실제 비중": f"{group_actual_weight:.2f}%",
-                    "차이": f"₩ {group_purchase - group_target_value:,.0f}"
+                    "차이": f"₩ {group_purchase - group_target_value:,.0f}",
+                    "종목별 내역": " + ".join(ticker_details)
                 })
         
         if group_summary_data:
