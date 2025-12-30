@@ -248,6 +248,41 @@ if st.session_state.total_balance > 0:
     with st.spinner("현재 가격을 조회하는 중..."):
         prices = get_current_prices(ALL_TICKERS)
     
+    # 그룹별 합산 비중 계산
+    weight_groups = {}
+    for ticker, info in PORTFOLIO_FLAT.items():
+        group = info['group']
+        if group not in weight_groups:
+            weight_groups[group] = []
+        weight_groups[group].append(ticker)
+    
+    # 그룹별 목표 금액 및 기존 보유 평가액 계산
+    group_target_values = {}
+    group_current_values = {}
+    group_old_current_values = {}  # 기존 종목만의 평가액 (신규 종목 제외)
+    for group, tickers in weight_groups.items():
+        if len(tickers) > 1:
+            # 그룹 총 비중 (첫 번째 티커의 weight가 그룹 총 비중)
+            group_total_weight = st.session_state.adjustable_weights.get(tickers[0], PORTFOLIO_FLAT[tickers[0]]['weight'])
+            group_target_values[group] = total_balance * group_total_weight
+            
+            # 그룹 내 전체 보유 평가액 합계
+            group_current_value = sum([
+                st.session_state.holdings.get(ticker, 0) * prices.get(ticker, 0)
+                for ticker in tickers
+                if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
+            ])
+            group_current_values[group] = group_current_value
+            
+            # 그룹 내 기존 종목(신규 아님)의 보유 평가액 합계
+            group_old_current_value = sum([
+                st.session_state.holdings.get(ticker, 0) * prices.get(ticker, 0)
+                for ticker in tickers
+                if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
+                and not PORTFOLIO_FLAT[ticker].get('is_new', False)
+            ])
+            group_old_current_values[group] = group_old_current_value
+    
     # 포트폴리오 계산
     portfolio_data = []
     
@@ -255,22 +290,54 @@ if st.session_state.total_balance > 0:
         info = PORTFOLIO_FLAT[ticker]
         price = prices.get(ticker)
         current_holding = st.session_state.holdings.get(ticker, 0)
-        target_weight = st.session_state.adjustable_weights.get(ticker, info['weight'])
+        group = info['group']
+        
+        # 그룹 내 다른 티커들과 합산해야 하는지 확인
+        group_tickers = weight_groups.get(group, [])
+        is_grouped = len(group_tickers) > 1
         
         if price and price > 0:
-            target_value = total_balance * target_weight
-            calculated_quantity = target_value / price
             current_value = current_holding * price
+            
+            if is_grouped:
+                # 그룹별 합산 비중 사용
+                group_target_value = group_target_values.get(group, 0)
+                group_current_value = group_current_values.get(group, 0)
+                
+                # 신규 매수용 종목인지 확인
+                if info.get('is_new', False):
+                    # 신규 매수용: 그룹 목표 금액 - 기존 종목들의 현재 평가액 합계
+                    group_old_current_value = group_old_current_values.get(group, 0)
+                    remaining_value = group_target_value - group_old_current_value
+                    calculated_quantity = max(0, remaining_value / price) if remaining_value > 0 else 0
+                    target_value = remaining_value
+                else:
+                    # 기존 종목: 현재 보유 평가액만 표시
+                    calculated_quantity = current_holding
+                    target_value = current_value
+            else:
+                # 단일 종목
+                target_weight = st.session_state.adjustable_weights.get(ticker, info['weight'])
+                target_value = total_balance * target_weight
+                calculated_quantity = target_value / price
         else:
-            target_value = total_balance * target_weight
+            target_value = 0
             calculated_quantity = 0
             current_value = 0
+        
+        # 그룹 총 비중 표시
+        if is_grouped:
+            group_total_weight = st.session_state.adjustable_weights.get(group_tickers[0], PORTFOLIO_FLAT[group_tickers[0]]['weight'])
+            weight_display = f"{group_total_weight*100:.0f}% (그룹 합산)"
+        else:
+            target_weight = st.session_state.adjustable_weights.get(ticker, info['weight'])
+            weight_display = f"{target_weight*100:.0f}%"
         
         portfolio_data.append({
             "구분": info['group'],
             "티커": ticker,
             "상품": info['name'],
-            "비중 조절 가능": f"{target_weight*100:.0f}%",
+            "비중 조절 가능": weight_display,
             "총자산 분배": f"₩ {target_value:,.0f}",
             "현재가(실시간)": f"₩ {price:,.0f}" if price else "N/A",
             "계산된 수량": f"{calculated_quantity:.2f}" if calculated_quantity > 0 else "0.00",
@@ -282,6 +349,7 @@ if st.session_state.total_balance > 0:
     
     # 구매 수량 입력 섹션
     st.subheader("📝 구매 수량 입력")
+    st.info("💡 **그룹별 합산 비중 안내**: S&P500(선진국)과 금은 그룹 내 종목들의 합계가 목표 비중에 맞춰집니다.")
     
     purchase_data = []
     total_purchase_amount = 0
@@ -289,11 +357,32 @@ if st.session_state.total_balance > 0:
     for ticker in ALL_TICKERS:
         info = PORTFOLIO_FLAT[ticker]
         price = prices.get(ticker)
+        group = info['group']
+        group_tickers = weight_groups.get(group, [])
+        is_grouped = len(group_tickers) > 1
         
         if price and price > 0:
-            target_weight = st.session_state.adjustable_weights.get(ticker, info['weight'])
-            target_value = total_balance * target_weight
-            calculated_quantity = target_value / price
+            if is_grouped:
+                # 그룹별 합산 비중 계산
+                group_target_value = group_target_values.get(group, 0)
+                group_current_value = group_current_values.get(group, 0)
+                
+                if info.get('is_new', False):
+                    # 신규 매수용: 그룹 목표 금액 - 기존 종목들의 현재 평가액 합계
+                    group_old_current_value = group_old_current_values.get(group, 0)
+                    remaining_value = group_target_value - group_old_current_value
+                    calculated_quantity = max(0, remaining_value / price) if remaining_value > 0 else 0
+                    help_text = f"그룹 목표: ₩{group_target_value:,.0f} - 기존 종목 평가액 ₩{group_old_current_value:,.0f} = ₩{remaining_value:,.0f} 매수"
+                else:
+                    # 기존 종목: 현재 보유 수량 유지 (신규 매수 없음)
+                    calculated_quantity = st.session_state.holdings.get(ticker, 0)
+                    help_text = f"기존 보유 수량 유지 (그룹 합산 비중: {group_target_value/total_balance*100:.0f}%)"
+            else:
+                # 단일 종목
+                target_weight = st.session_state.adjustable_weights.get(ticker, info['weight'])
+                target_value = total_balance * target_weight
+                calculated_quantity = target_value / price
+                help_text = ""
             
             # 구매 수량 입력
             col1, col2 = st.columns([3, 1])
@@ -301,9 +390,10 @@ if st.session_state.total_balance > 0:
                 purchase_quantity = st.number_input(
                     f"{info['name']} - 계산된 수량: {calculated_quantity:.2f}",
                     min_value=0,
-                    value=int(calculated_quantity),
+                    value=int(calculated_quantity) if calculated_quantity > 0 else 0,
                     step=1,
-                    key=f"purchase_{ticker}"
+                    key=f"purchase_{ticker}",
+                    help=help_text if help_text else None
                 )
             
             with col2:
@@ -354,11 +444,26 @@ if st.session_state.total_balance > 0:
     
     rebalancing_data = []
     total_rebalance_amount = 0
+    total_sell_amount = 0
+    
+    # 그룹별 합산 평가액 확인
+    group_final_values = {}
+    for group, tickers in weight_groups.items():
+        if len(tickers) > 1:
+            group_final_value = sum([
+                st.session_state.get(f"purchase_{ticker}", 0) * prices.get(ticker, 0)
+                for ticker in tickers
+                if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
+            ])
+            group_final_values[group] = group_final_value
     
     for ticker in ALL_TICKERS:
         info = PORTFOLIO_FLAT[ticker]
         price = prices.get(ticker)
         current_holding = st.session_state.holdings.get(ticker, 0)
+        group = info['group']
+        group_tickers = weight_groups.get(group, [])
+        is_grouped = len(group_tickers) > 1
         
         # 구매 수량 가져오기 (위에서 입력한 값)
         purchase_quantity_key = f"purchase_{ticker}"
@@ -368,9 +473,18 @@ if st.session_state.total_balance > 0:
         else:
             # 기본값으로 계산된 수량 사용
             if price and price > 0:
-                target_weight = st.session_state.adjustable_weights.get(ticker, PORTFOLIO_FLAT[ticker]['weight'])
-                target_value = total_balance * target_weight
-                purchase_quantity = int(target_value / price)
+                if is_grouped:
+                    group_target_value = group_target_values.get(group, 0)
+                    group_old_current_value = group_old_current_values.get(group, 0)
+                    if info.get('is_new', False):
+                        remaining_value = group_target_value - group_old_current_value
+                        purchase_quantity = int(max(0, remaining_value / price)) if remaining_value > 0 else 0
+                    else:
+                        purchase_quantity = current_holding
+                else:
+                    target_weight = st.session_state.adjustable_weights.get(ticker, PORTFOLIO_FLAT[ticker]['weight'])
+                    target_value = total_balance * target_weight
+                    purchase_quantity = int(target_value / price)
         
         if price and price > 0:
             # 리밸런싱 필요 수량 = 구매할 수량 - 현재 보유 수량
@@ -382,11 +496,19 @@ if st.session_state.total_balance > 0:
                 action = f"+{rebalance_quantity:.0f} (매수)"
                 amount_str = f"₩ {rebalance_amount:,.0f}"
             elif rebalance_quantity < 0:
+                total_sell_amount += rebalance_amount
                 action = f"{rebalance_quantity:.0f} (매도)"
                 amount_str = f"₩ {rebalance_amount:,.0f}"
             else:
                 action = "0 (유지)"
                 amount_str = "₩ 0"
+            
+            # 그룹 정보 추가
+            group_info = ""
+            if is_grouped:
+                group_target_value = group_target_values.get(group, 0)
+                group_final_value = group_final_values.get(group, 0)
+                group_info = f" (그룹 목표: ₩{group_target_value:,.0f}, 합계: ₩{group_final_value:,.0f})"
             
             rebalancing_data.append({
                 "티커": ticker,
@@ -395,12 +517,17 @@ if st.session_state.total_balance > 0:
                 "목표 보유": purchase_quantity,
                 "리밸런싱": action,
                 "구매금액": amount_str,
+                "비고": group_info.strip(),
             })
     
     df_rebalancing = pd.DataFrame(rebalancing_data)
     st.dataframe(df_rebalancing, use_container_width=True, hide_index=True)
     
-    st.metric("구매금액 합계", f"₩ {total_rebalance_amount:,.0f}")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("구매금액 합계", f"₩ {total_rebalance_amount:,.0f}")
+    with col2:
+        st.metric("매도금액 합계", f"₩ {total_sell_amount:,.0f}")
     
     st.markdown("---")
     
