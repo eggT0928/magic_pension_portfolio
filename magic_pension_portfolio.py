@@ -121,8 +121,27 @@ if 'principal' not in st.session_state:
 
 if 'adjustable_weights' not in st.session_state:
     st.session_state.adjustable_weights = {}
+    # 그룹별로 첫 번째 종목만 그룹 비중을 가지도록 초기화
+    weight_groups_init = {}
     for ticker, info in PORTFOLIO_FLAT.items():
-        st.session_state.adjustable_weights[ticker] = info['weight']
+        group = info['group']
+        if group not in weight_groups_init:
+            weight_groups_init[group] = []
+        weight_groups_init[group].append(ticker)
+    
+    for group, tickers in weight_groups_init.items():
+        if len(tickers) > 1:
+            # 그룹 내 첫 번째 종목만 그룹 비중 저장
+            first_ticker = tickers[0]
+            group_weight = PORTFOLIO_FLAT[first_ticker]['weight']
+            st.session_state.adjustable_weights[first_ticker] = group_weight
+            # 그룹 내 두 번째 이후 종목은 0으로 설정
+            for t in tickers[1:]:
+                st.session_state.adjustable_weights[t] = 0.0
+        else:
+            # 단일 종목은 그대로
+            ticker = tickers[0]
+            st.session_state.adjustable_weights[ticker] = PORTFOLIO_FLAT[ticker]['weight']
 
 if 'purchase_quantities' not in st.session_state:
     st.session_state.purchase_quantities = {ticker: 0 for ticker in ALL_TICKERS}
@@ -281,7 +300,8 @@ if st.session_state.total_balance > 0:
     st.subheader("📊 포트폴리오 관리 테이블")
     st.info("💡 **그룹별 합산 비중**: S&P500(선진국)과 금은 그룹 내 종목들의 구매금액 합계가 목표 비중에 맞춰집니다.")
     
-    # 컬럼 설정 (그룹별로 비중 입력 가능 여부 결정)
+    # 컬럼 설정
+    # 그룹 내 두 번째 종목의 비중은 편집 후 처리에서 무시됨
     column_config = {
         "구분": st.column_config.TextColumn("구분", disabled=True),
         "티커": st.column_config.TextColumn("티커", disabled=True),
@@ -292,7 +312,7 @@ if st.session_state.total_balance > 0:
             max_value=100.0,
             step=0.1,
             format="%.1f",
-            help="그룹별 비중을 조절합니다. 그룹 내 첫 번째 종목만 수정하면 그룹 전체 비중이 변경됩니다. (예: 선진국 24%, 금 19%)"
+            help="⚠️ 그룹별 비중: 그룹 내 첫 번째 종목만 수정하세요! (선진국 24%, 금 19% - 두 종목 합계)"
         ),
         "총자산 분배": st.column_config.NumberColumn("총자산 분배 (원)", format="%d", disabled=True),
         "현재가(실시간)": st.column_config.NumberColumn("현재가 (원)", format="%d", disabled=True),
@@ -332,7 +352,7 @@ if st.session_state.total_balance > 0:
         group_tickers = weight_groups.get(group, [])
         is_grouped = len(group_tickers) > 1
         
-        # 비중 업데이트 (그룹 내 첫 번째 종목만)
+        # 비중 업데이트 (그룹 내 첫 번째 종목만, 두 번째 종목은 무시)
         new_weight = row['비중 조절 가능'] / 100.0  # 퍼센트를 소수로 변환
         if is_grouped:
             # 그룹의 첫 번째 티커인 경우만 비중 업데이트
@@ -341,7 +361,8 @@ if st.session_state.total_balance > 0:
                 # 그룹 내 다른 티커들은 0으로 설정 (그룹 비중은 첫 번째 티커에만 저장)
                 for t in group_tickers[1:]:
                     st.session_state.adjustable_weights[t] = 0.0
-            # 그룹 내 두 번째 이후 종목의 비중은 무시 (첫 번째 종목과 동일하게 표시만 됨)
+            # 그룹 내 두 번째 이후 종목의 비중 변경은 완전히 무시
+            # (첫 번째 종목의 비중이 그룹 전체 비중을 결정)
         else:
             st.session_state.adjustable_weights[ticker] = new_weight
         
