@@ -201,29 +201,26 @@ with st.sidebar:
     # 그룹별 총 비중 표시 및 조절
     for group, tickers in weight_groups.items():
         if len(tickers) > 1:
-            # 그룹 내 합산 비중
-            group_total_weight = sum(st.session_state.adjustable_weights.get(t, PORTFOLIO_FLAT[t]['weight']) for t in tickers)
-            st.text_input(
-                f"{group} 총 비중",
-                value=f"{group_total_weight*100:.0f}%",
-                disabled=True,
-                key=f"group_total_{group}"
+            # 그룹 내 합산 비중 (첫 번째 티커의 weight가 그룹 총 비중)
+            first_ticker = tickers[0]
+            group_total_weight = st.session_state.adjustable_weights.get(first_ticker, PORTFOLIO_FLAT[first_ticker]['weight'])
+            
+            # 그룹 총 비중만 조절 (개별 종목 비중은 조절하지 않음)
+            new_group_weight = st.slider(
+                f"{group} 총 비중 (그룹 합산)",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(group_total_weight),
+                step=0.01,
+                format="%.2f%%",
+                key=f"group_weight_{group}",
+                help=f"{group} 그룹 내 종목들의 구매금액 합계가 이 비중에 맞춰집니다."
             )
             
-            # 그룹 내 각 티커의 비중 조절 (합이 그룹 총 비중이 되도록)
-            for ticker in tickers:
-                info = PORTFOLIO_FLAT[ticker]
-                current_weight = st.session_state.adjustable_weights.get(ticker, info['weight'])
-                new_weight = st.slider(
-                    f"{info['name']}",
-                    min_value=0.0,
-                    max_value=group_total_weight,
-                    value=float(current_weight),
-                    step=0.01,
-                    format="%.2f%%",
-                    key=f"weight_{ticker}"
-                )
-                st.session_state.adjustable_weights[ticker] = new_weight
+            # 그룹 비중을 첫 번째 티커에 저장 (나머지는 0으로 설정)
+            st.session_state.adjustable_weights[first_ticker] = new_group_weight
+            for ticker in tickers[1:]:
+                st.session_state.adjustable_weights[ticker] = 0.0  # 그룹 비중은 첫 번째 티커에만 저장
         else:
             # 단일 티커인 경우
             ticker = tickers[0]
@@ -413,6 +410,17 @@ if st.session_state.total_balance > 0:
     
     st.markdown("---")
     
+    # 그룹별 구매금액 합계 확인
+    group_purchase_amounts = {}
+    for group, tickers in weight_groups.items():
+        if len(tickers) > 1:
+            group_purchase = sum([
+                st.session_state.get(f"purchase_{ticker}", 0) * prices.get(ticker, 0)
+                for ticker in tickers
+                if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
+            ])
+            group_purchase_amounts[group] = group_purchase
+    
     # 요약 정보
     st.subheader("📊 요약 정보")
     col1, col2, col3 = st.columns(3)
@@ -436,6 +444,28 @@ if st.session_state.total_balance > 0:
         st.metric("원금", f"₩ {principal:,.0f}")
         st.metric("수익금", f"₩ {profit:,.0f}")
         st.metric("수익률", f"{profit_rate:.2f}%")
+    
+    # 그룹별 구매금액 합계 표시
+    if group_purchase_amounts:
+        st.markdown("---")
+        st.subheader("📊 그룹별 구매금액 합계")
+        group_summary_data = []
+        for group, group_purchase in group_purchase_amounts.items():
+            group_target_value = group_target_values.get(group, 0)
+            group_target_weight = group_target_value / total_balance * 100 if total_balance > 0 else 0
+            group_actual_weight = group_purchase / total_balance * 100 if total_balance > 0 else 0
+            
+            group_summary_data.append({
+                "그룹": group,
+                "목표 비중": f"{group_target_weight:.2f}%",
+                "목표 금액": f"₩ {group_target_value:,.0f}",
+                "실제 구매금액 합계": f"₩ {group_purchase:,.0f}",
+                "실제 비중": f"{group_actual_weight:.2f}%",
+                "차이": f"₩ {group_purchase - group_target_value:,.0f}"
+            })
+        
+        df_group_summary = pd.DataFrame(group_summary_data)
+        st.dataframe(df_group_summary, use_container_width=True, hide_index=True)
     
     st.markdown("---")
     
