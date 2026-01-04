@@ -28,8 +28,8 @@ st.markdown("""
 PORTFOLIO_CONFIG = {
     "위험자산": {
         "선진국": {
-            "KRX:379800": {"name": "KODEX 미국 S&P500TR", "weight": 0.24, "group": "선진국", "is_new": False},
-            "KRX:360200": {"name": "ACE 미국 S&P500TR", "weight": 0.24, "group": "선진국", "is_new": True},
+            "KRX:379800": {"name": "KODEX 미국 S&P500TR", "weight": 0.24, "group": "선진국", "is_new": False},  # 기존 보유
+            "KRX:360200": {"name": "ACE 미국 S&P500TR", "weight": 0.24, "group": "선진국", "is_new": True},  # 신규 구매
         },
         "신흥국": {
             "KRX:294400": {"name": "KOSEF 200TR", "weight": 0.08, "group": "신흥국", "is_new": False},
@@ -38,8 +38,8 @@ PORTFOLIO_CONFIG = {
         }
     },
     "대체 투자": {
-        "KRX:0072R0": {"name": "TIGER KRX금현물", "weight": 0.19, "group": "금", "is_new": True},
-        "KRX:411060": {"name": "ACE KRX금현물", "weight": 0.19, "group": "금", "is_new": False},
+        "KRX:0072R0": {"name": "TIGER KRX금현물", "weight": 0.19, "group": "금", "is_new": False},  # 기존 보유
+        "KRX:411060": {"name": "ACE KRX금현물", "weight": 0.19, "group": "금", "is_new": True},  # 신규 구매
     },
     "안전자산": {
         "한국 국채": {
@@ -159,6 +159,13 @@ if 'adjustable_weights' not in st.session_state:
 if 'purchase_quantities' not in st.session_state:
     st.session_state.purchase_quantities = {ticker: 0 for ticker in ALL_TICKERS}
 
+# 상단 경고 배너
+st.markdown("""
+    <div style="background-color: #FFE066; padding: 10px; border-radius: 5px; margin-bottom: 20px; text-align: center;">
+        <strong>김성일 작가님 최신버전 참고 → [마법의 연금 굴리기 전면개정판 필독]</strong>
+    </div>
+""", unsafe_allow_html=True)
+
 # 메인 타이틀
 st.title("💰 김성일 마법의 연금굴리기 포트폴리오 관리")
 st.markdown("---")
@@ -215,28 +222,21 @@ if st.session_state.total_balance > 0:
     
     # 그룹별 목표 금액 및 기존 보유 평가액 계산
     group_target_values = {}
-    group_current_values = {}
-    group_old_current_values = {}
+    group_old_holdings_values = {}  # 기존 보유 종목(is_new=False)의 현재 평가액
     for group, tickers in weight_groups.items():
         if len(tickers) > 1:
             first_ticker = tickers[0]
             group_total_weight = st.session_state.adjustable_weights.get(first_ticker, PORTFOLIO_FLAT[first_ticker]['weight'])
             group_target_values[group] = total_balance * group_total_weight
             
-            group_current_value = sum([
-                st.session_state.holdings.get(ticker, 0) * prices.get(ticker, 0)
-                for ticker in tickers
-                if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
-            ])
-            group_current_values[group] = group_current_value
-            
-            group_old_current_value = sum([
+            # 기존 보유 종목(is_new=False)의 현재 평가액 합계
+            group_old_value = sum([
                 st.session_state.holdings.get(ticker, 0) * prices.get(ticker, 0)
                 for ticker in tickers
                 if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
                 and not PORTFOLIO_FLAT[ticker].get('is_new', False)
             ])
-            group_old_current_values[group] = group_old_current_value
+            group_old_holdings_values[group] = group_old_value
     
     # 통합 테이블 데이터 생성
     table_data = []
@@ -260,11 +260,14 @@ if st.session_state.total_balance > 0:
         if is_grouped:
             group_target_value = group_target_values.get(group, 0)
             if info.get('is_new', False):
-                group_old_current_value = group_old_current_values.get(group, 0)
-                target_value = group_target_value - group_old_current_value
+                # 신규 종목: 그룹 목표 금액에서 기존 보유 종목 평가액을 뺀 금액
+                group_old_value = group_old_holdings_values.get(group, 0)
+                target_value = max(0, group_target_value - group_old_value)
             else:
+                # 기존 보유 종목: 현재 보유 평가액 표시
                 target_value = current_holding * price if price > 0 else 0
         else:
+            # 단일 종목은 그대로
             target_value = total_balance * weight_value
         
         # 계산된 수량
@@ -283,11 +286,11 @@ if st.session_state.total_balance > 0:
         # 리밸런싱 계산
         rebalance_quantity = purchase_quantity - current_holding
         if rebalance_quantity > 0:
-            rebalance_text = f"+{rebalance_quantity:.0f} (매수)"
+            rebalance_text = f"+{rebalance_quantity:.0f}"
         elif rebalance_quantity < 0:
-            rebalance_text = f"{rebalance_quantity:.0f} (매도)"
+            rebalance_text = f"{rebalance_quantity:.0f}"
         else:
-            rebalance_text = "0"
+            rebalance_text = f"0 {info['name']}"
         
         # 비중 표시 (퍼센트로)
         weight_display = weight_value * 100
@@ -305,13 +308,29 @@ if st.session_state.total_balance > 0:
             "실구매 비율": actual_purchase_ratio,
             "보유 수량": current_holding,
             "리밸런싱": rebalance_text,
+            "구매금액": 0,  # 스크린샷에 있는 빈 컬럼
+            "구매금액 합계": 0,  # 스크린샷에 있는 빈 컬럼
         })
     
     df_table = pd.DataFrame(table_data)
     
     # 편집 가능한 테이블 생성
     st.subheader("📊 포트폴리오 관리 테이블")
-    st.info("💡 **그룹별 합산 비중**: S&P500(선진국)과 금은 그룹 내 종목들의 구매금액 합계가 목표 비중에 맞춰집니다.")
+    
+    # 총자산 분배 합계 계산 및 표시
+    total_allocation = sum([row['총자산 분배'] for row in table_data])
+    st.markdown(f"""
+        <div style="background-color: #FF69B4; color: white; padding: 10px; border-radius: 5px; margin-bottom: 10px; text-align: center;">
+            <strong>총자산 분배 합계: ₩ {total_allocation:,.0f}</strong>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    st.info("""
+    💡 **그룹별 합산 비중 안내**:
+    - **선진국 (24%)**: KODEX S&P500(기존 보유) + ACE S&P500(신규 구매) = 두 종목 합계 24%
+    - **금 (19%)**: TIGER 금(기존 보유) + ACE 금(신규 구매) = 두 종목 합계 19%
+    - 기존 보유 종목의 현재 평가액을 제외한 나머지 금액을 신규 종목으로 구매하세요.
+    """)
     
     # 컬럼 설정
     # 그룹 내 두 번째 종목의 비중은 편집 후 처리에서 무시됨
@@ -344,7 +363,9 @@ if st.session_state.total_balance > 0:
             step=1,
             format="%d"
         ),
-        "리밸런싱": st.column_config.TextColumn("리밸런싱", disabled=True),
+        "리밸런싱": st.column_config.TextColumn("리밸런싱 + 개수만큼 매수/-개수만큼 매도", disabled=True),
+        "구매금액": st.column_config.NumberColumn("구매금액 (원)", format="%d", disabled=True),
+        "구매금액 합계": st.column_config.NumberColumn("구매금액 합계 (원)", format="%d", disabled=True),
     }
     
     # 편집된 데이터 가져오기
@@ -395,21 +416,17 @@ if st.session_state.total_balance > 0:
     # 요약 정보
     st.subheader("📊 요약 정보")
     
-    # 총 구매 금액 계산
-    total_purchase_amount = sum([
-        st.session_state.purchase_quantities.get(ticker, 0) * prices.get(ticker, 0)
-        for ticker in ALL_TICKERS
-        if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
-    ])
+    # 총자산 분배 합계 (목표 배분 금액 합계)
+    total_allocation_sum = sum([row['총자산 분배'] for row in table_data])
     
-    # 현재 평가액 합계
+    # 현재 평가액 합계 (실제 보유 평가액)
     total_current_value = sum([
         st.session_state.holdings.get(ticker, 0) * prices.get(ticker, 0)
         for ticker in ALL_TICKERS
         if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
     ])
     
-    # 수익 계산
+    # 수익 계산 (현재 평가액 기준)
     principal = st.session_state.principal if st.session_state.principal > 0 else total_balance
     profit = total_current_value - principal
     profit_rate = (profit / principal * 100) if principal > 0 else 0
@@ -418,7 +435,8 @@ if st.session_state.total_balance > 0:
     with col1:
         st.metric("원금", f"₩ {principal:,.0f}")
     with col2:
-        st.metric("현재", f"₩ {total_current_value:,.0f}")
+        # 스크린샷에 맞게 "현재" 값을 총자산 분배 합계로 표시
+        st.metric("현재", f"₩ {total_allocation_sum:,.0f}")
     with col3:
         st.metric("수익금", f"₩ {profit:,.0f}")
     with col4:
@@ -486,7 +504,9 @@ else:
     
     ### 참고사항
     
-    - S&P500 신규 매수는 ACE로 진행 (보수 낮음)
-    - 금 신규 매수는 TIGER로 진행 (보수 낮음)
+    - **선진국 (S&P500)**: KODEX는 기존 보유, ACE는 신규 구매 (보수 낮음)
+    - **금**: TIGER는 기존 보유, ACE는 신규 구매 (보수 낮음)
     - 그룹별 비중은 그룹 내 첫 번째 종목의 비중을 수정하면 전체 그룹 비중이 변경됩니다.
+    - 기존 보유 종목의 현재 평가액을 자동으로 계산하고, 목표 비중에서 차감하여 신규 종목에 배분합니다.
+    - "구매할 수량 입력"을 통해 두 종목의 구매금액 합계가 그룹 비중에 맞춰지도록 조정하세요.
     """)
