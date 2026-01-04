@@ -28,8 +28,8 @@ st.markdown("""
 PORTFOLIO_CONFIG = {
     "위험자산": {
         "선진국": {
-            "KRX:379800": {"name": "KODEX 미국 S&P500TR(보수 0.0062%)", "weight": 0.24, "group": "선진국", "is_new": False},  # 기존 보유
-            "KRX:360200": {"name": "ACE 미국 S&P500TR(보수 0.0047%)", "weight": 0.24, "group": "선진국", "is_new": True},  # 신규 구매
+            "KRX:379800": {"name": "KODEX 미국 S&P500TR(보수 0.0062%)", "weight": 0.24, "group": "선진국", "is_new": False},  # 기존 보유 (그룹 비중 24%)
+            "KRX:360200": {"name": "ACE 미국 S&P500TR(보수 0.0047%)", "weight": 0.0, "group": "선진국", "is_new": True},  # 신규 구매 (그룹 합산이므로 0)
         },
         "신흥국": {
             "KRX:294400": {"name": "KOSEF 200TR", "weight": 0.08, "group": "신흥국", "is_new": False},
@@ -38,8 +38,8 @@ PORTFOLIO_CONFIG = {
         }
     },
     "대체 투자": {
-        "KRX:0072R0": {"name": "TIGER KRX금현물(2025.6.12.신규상장 보수 0.15%)", "weight": 0.19, "group": "금", "is_new": True},  # 신규 구매
-        "KRX:411060": {"name": "ACE KRX금현물(보수 0.19%)", "weight": 0.19, "group": "금", "is_new": False}, # 기존 보유
+        "KRX:0072R0": {"name": "TIGER KRX금현물(2025.6.12.신규상장 보수 0.15%)", "weight": 0.0, "group": "금", "is_new": True},  # 신규 구매 (그룹 합산이므로 0)
+        "KRX:411060": {"name": "ACE KRX금현물(보수 0.19%)", "weight": 0.19, "group": "금", "is_new": False}, # 기존 보유 (그룹 비중 19%)
     },
     "안전자산": {
         "한국 국채": {
@@ -150,9 +150,33 @@ if 'adjustable_weights' not in st.session_state:
     st.session_state.adjustable_weights = {}
 
 # 모든 티커의 비중이 설정되어 있는지 확인하고, 없으면 기본값으로 설정
+# 그룹별 티커 리스트 생성 (초기화용)
+group_tickers_init = get_group_tickers()
+
 for ticker, info in PORTFOLIO_FLAT.items():
-    if ticker not in st.session_state.adjustable_weights or st.session_state.adjustable_weights[ticker] == 0:
-        st.session_state.adjustable_weights[ticker] = info['weight']
+    if ticker not in st.session_state.adjustable_weights:
+        group = info['group']
+        tickers_in_group = group_tickers_init.get(group, [])
+        is_group_sum = group in GROUP_SUM_GROUPS and len(tickers_in_group) > 1
+        
+        if is_group_sum:
+            # 그룹 합산 비중인 경우, 그룹 내 첫 번째 종목만 그룹 비중을 가지고, 두 번째 종목은 0
+            if ticker == tickers_in_group[0]:
+                st.session_state.adjustable_weights[ticker] = info['weight']
+            else:
+                st.session_state.adjustable_weights[ticker] = 0.0
+        else:
+            # 개별 비중인 경우, 각 종목의 weight 사용
+            st.session_state.adjustable_weights[ticker] = info['weight']
+    elif st.session_state.adjustable_weights[ticker] == 0:
+        # 이미 0으로 설정된 경우는 그대로 유지 (그룹 합산 비중의 두 번째 종목)
+        group = info['group']
+        tickers_in_group = group_tickers_init.get(group, [])
+        is_group_sum = group in GROUP_SUM_GROUPS and len(tickers_in_group) > 1
+        
+        if not is_group_sum:
+            # 개별 비중인 경우에만 기본값으로 설정
+            st.session_state.adjustable_weights[ticker] = info['weight']
 
 if 'purchase_quantities' not in st.session_state:
     st.session_state.purchase_quantities = {ticker: 0 for ticker in ALL_TICKERS}
