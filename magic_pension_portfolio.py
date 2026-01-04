@@ -148,7 +148,10 @@ if 'principal' not in st.session_state:
 
 if 'adjustable_weights' not in st.session_state:
     st.session_state.adjustable_weights = {}
-    for ticker, info in PORTFOLIO_FLAT.items():
+
+# 모든 티커의 비중이 설정되어 있는지 확인하고, 없으면 기본값으로 설정
+for ticker, info in PORTFOLIO_FLAT.items():
+    if ticker not in st.session_state.adjustable_weights or st.session_state.adjustable_weights[ticker] == 0:
         st.session_state.adjustable_weights[ticker] = info['weight']
 
 if 'purchase_quantities' not in st.session_state:
@@ -244,25 +247,46 @@ if st.session_state.total_balance > 0:
         if is_group_sum:
             # 그룹 합산 비중 - 그룹 내 첫 번째 종목의 비중이 그룹 전체 비중
             first_ticker = tickers_in_group[0]
-            weight_value = st.session_state.adjustable_weights.get(first_ticker, PORTFOLIO_FLAT[first_ticker]['weight'])
+            weight_value = st.session_state.adjustable_weights.get(first_ticker)
+            if weight_value is None or weight_value == 0:
+                weight_value = PORTFOLIO_FLAT[first_ticker]['weight']
         else:
             # 개별 비중
-            weight_value = st.session_state.adjustable_weights.get(ticker, info['weight'])
+            weight_value = st.session_state.adjustable_weights.get(ticker)
+            if weight_value is None or weight_value == 0:
+                weight_value = info['weight']
         
         # 총자산 분배 계산
         if is_group_sum:
             # 그룹 합산 비중 (선진국, 금)
             group_target_value = group_target_values.get(group, 0)
+            if group_target_value == 0:
+                # 그룹 목표 금액이 없으면 계산
+                first_ticker = tickers_in_group[0]
+                group_weight = st.session_state.adjustable_weights.get(first_ticker, PORTFOLIO_FLAT[first_ticker]['weight'])
+                group_target_value = total_balance * group_weight
+            
+            # 기존 보유 종목의 현재 평가액
+            current_value = current_holding * price if price > 0 else 0
+            
             if info.get('is_new', False):
                 # 신규 종목: 그룹 목표 금액에서 기존 보유 종목 평가액을 뺀 금액
                 group_old_value = group_old_holdings_values.get(group, 0)
                 target_value = max(0, group_target_value - group_old_value)
             else:
-                # 기존 보유 종목: 현재 보유 평가액
-                target_value = current_holding * price if price > 0 else 0
+                # 기존 보유 종목: 보유 수량이 있으면 보유 평가액, 없으면 그룹 목표 금액 표시
+                if current_value > 0:
+                    target_value = current_value
+                else:
+                    # 보유 수량이 없으면 그룹 목표 금액 표시 (스프레드시트 기준)
+                    target_value = group_target_value
         else:
             # 개별 비중 (신흥국, 미국 국채, 한국 국채, 현금성 자산)
-            target_value = total_balance * weight_value
+            # weight_value가 0이거나 None이면 기본값 사용
+            if weight_value is None or weight_value == 0:
+                weight_value = info['weight']
+            # 총자산 분배 = 총자산 × 비중
+            target_value = total_balance * weight_value if total_balance > 0 and weight_value > 0 else 0
         
         # 계산된 수량
         calculated_quantity = target_value / price if price > 0 else 0
