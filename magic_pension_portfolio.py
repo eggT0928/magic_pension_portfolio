@@ -134,32 +134,32 @@ if 'principal' not in st.session_state:
 
 if 'adjustable_weights' not in st.session_state:
     st.session_state.adjustable_weights = {}
-    # 그룹별로 첫 번째 종목만 그룹 비중을 가지도록 초기화
-    weight_groups_init = {}
-    for ticker, info in PORTFOLIO_FLAT.items():
-        group = info['group']
-        if group not in weight_groups_init:
-            weight_groups_init[group] = []
-        weight_groups_init[group].append(ticker)
     
-    for group, tickers in weight_groups_init.items():
-        if len(tickers) > 1:
+# 그룹별로 첫 번째 종목만 그룹 비중을 가지도록 초기화 (누락된 경우 대비)
+weight_groups_init = {}
+for ticker, info in PORTFOLIO_FLAT.items():
+    group = info['group']
+    if group not in weight_groups_init:
+        weight_groups_init[group] = []
+    weight_groups_init[group].append(ticker)
+    
+    # 각 티커가 세션 상태에 없거나 0이면 초기화
+    if ticker not in st.session_state.adjustable_weights or st.session_state.adjustable_weights[ticker] == 0:
+        group_tickers = weight_groups_init[group]
+        if len(group_tickers) > 1:
             # 그룹 합산 비중 (선진국, 금)인 경우
             if group in ['선진국', '금']:
                 # 그룹 내 첫 번째 종목만 그룹 비중 저장
-                first_ticker = tickers[0]
-                group_weight = PORTFOLIO_FLAT[first_ticker]['weight']
-                st.session_state.adjustable_weights[first_ticker] = group_weight
-                # 그룹 내 두 번째 이후 종목은 0으로 설정
-                for t in tickers[1:]:
-                    st.session_state.adjustable_weights[t] = 0.0
+                if ticker == group_tickers[0]:
+                    group_weight = PORTFOLIO_FLAT[ticker]['weight']
+                    st.session_state.adjustable_weights[ticker] = group_weight
+                else:
+                    st.session_state.adjustable_weights[ticker] = 0.0
             else:
                 # 개별 비중 그룹 (신흥국, 미국 국채) - 각 종목이 개별 비중
-                for ticker in tickers:
-                    st.session_state.adjustable_weights[ticker] = PORTFOLIO_FLAT[ticker]['weight']
+                st.session_state.adjustable_weights[ticker] = PORTFOLIO_FLAT[ticker]['weight']
         else:
             # 단일 종목은 그대로
-            ticker = tickers[0]
             st.session_state.adjustable_weights[ticker] = PORTFOLIO_FLAT[ticker]['weight']
 
 if 'purchase_quantities' not in st.session_state:
@@ -267,7 +267,10 @@ if st.session_state.total_balance > 0:
             weight_value = group_total_weight
         else:
             # 개별 비중 (신흥국, 미국 국채, 단일 종목 등)
-            weight_value = st.session_state.adjustable_weights.get(ticker, info['weight'])
+            # 세션 상태에 값이 없으면 기본값 사용
+            weight_value = st.session_state.adjustable_weights.get(ticker)
+            if weight_value is None or weight_value == 0:
+                weight_value = info['weight']
         
         # 목표 금액 계산
         # 그룹 합산이 필요한 그룹: 선진국, 금 (두 종목 합계가 그룹 비중)
@@ -286,6 +289,9 @@ if st.session_state.total_balance > 0:
                 target_value = current_holding * price if price > 0 else 0
         else:
             # 개별 비중 (신흥국, 미국 국채, 단일 종목 등)
+            # weight_value가 0이면 기본값 사용
+            if weight_value == 0:
+                weight_value = info['weight']
             target_value = total_balance * weight_value
         
         # 계산된 수량
@@ -390,7 +396,7 @@ if st.session_state.total_balance > 0:
     edited_df = st.data_editor(
         df_table,
         column_config=column_config,
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
         num_rows="fixed",
         key="portfolio_editor"
@@ -497,7 +503,7 @@ if st.session_state.total_balance > 0:
         
         if group_summary_data:
             df_group_summary = pd.DataFrame(group_summary_data)
-            st.dataframe(df_group_summary, use_container_width=True, hide_index=True)
+            st.dataframe(df_group_summary, width='stretch', hide_index=True)
 
 else:
     st.info("👈 위에서 총 자산을 입력하고 '가격 조회' 버튼을 클릭하세요.")
