@@ -144,13 +144,19 @@ if 'adjustable_weights' not in st.session_state:
     
     for group, tickers in weight_groups_init.items():
         if len(tickers) > 1:
-            # 그룹 내 첫 번째 종목만 그룹 비중 저장
-            first_ticker = tickers[0]
-            group_weight = PORTFOLIO_FLAT[first_ticker]['weight']
-            st.session_state.adjustable_weights[first_ticker] = group_weight
-            # 그룹 내 두 번째 이후 종목은 0으로 설정
-            for t in tickers[1:]:
-                st.session_state.adjustable_weights[t] = 0.0
+            # 그룹 합산 비중 (선진국, 금)인 경우
+            if group in ['선진국', '금']:
+                # 그룹 내 첫 번째 종목만 그룹 비중 저장
+                first_ticker = tickers[0]
+                group_weight = PORTFOLIO_FLAT[first_ticker]['weight']
+                st.session_state.adjustable_weights[first_ticker] = group_weight
+                # 그룹 내 두 번째 이후 종목은 0으로 설정
+                for t in tickers[1:]:
+                    st.session_state.adjustable_weights[t] = 0.0
+            else:
+                # 개별 비중 그룹 (신흥국, 미국 국채) - 각 종목이 개별 비중
+                for ticker in tickers:
+                    st.session_state.adjustable_weights[ticker] = PORTFOLIO_FLAT[ticker]['weight']
         else:
             # 단일 종목은 그대로
             ticker = tickers[0]
@@ -220,11 +226,12 @@ if st.session_state.total_balance > 0:
             weight_groups[group] = []
         weight_groups[group].append(ticker)
     
-    # 그룹별 목표 금액 및 기존 보유 평가액 계산
+    # 그룹별 목표 금액 및 기존 보유 평가액 계산 (그룹 합산 비중인 경우만)
     group_target_values = {}
     group_old_holdings_values = {}  # 기존 보유 종목(is_new=False)의 현재 평가액
     for group, tickers in weight_groups.items():
-        if len(tickers) > 1:
+        # 그룹 합산 비중인 경우만 (선진국, 금)
+        if len(tickers) > 1 and group in ['선진국', '금']:
             first_ticker = tickers[0]
             group_total_weight = st.session_state.adjustable_weights.get(first_ticker, PORTFOLIO_FLAT[first_ticker]['weight'])
             group_target_values[group] = total_balance * group_total_weight
@@ -249,15 +256,26 @@ if st.session_state.total_balance > 0:
         group_tickers = weight_groups.get(group, [])
         is_grouped = len(group_tickers) > 1
         
-        # 비중 계산 (그룹 내 모든 종목이 동일한 그룹 비중 표시)
-        if is_grouped:
+        # 비중 계산
+        # 그룹 합산이 필요한 그룹: 선진국, 금 (두 종목 합계가 그룹 비중)
+        # 개별 비중 그룹: 신흥국, 미국 국채 (각 종목이 개별 비중)
+        is_grouped_sum = is_grouped and group in ['선진국', '금']
+        
+        if is_grouped_sum:
+            # 그룹 합산 비중 (선진국, 금) - 그룹 내 모든 종목이 동일한 그룹 비중 표시
             group_total_weight = st.session_state.adjustable_weights.get(group_tickers[0], PORTFOLIO_FLAT[group_tickers[0]]['weight'])
-            weight_value = group_total_weight  # 그룹 내 모든 종목이 동일한 비중 표시
+            weight_value = group_total_weight
         else:
+            # 개별 비중 (신흥국, 미국 국채, 단일 종목 등)
             weight_value = st.session_state.adjustable_weights.get(ticker, info['weight'])
         
         # 목표 금액 계산
-        if is_grouped:
+        # 그룹 합산이 필요한 그룹: 선진국, 금 (두 종목 합계가 그룹 비중)
+        # 개별 비중 그룹: 신흥국, 미국 국채 (각 종목이 개별 비중)
+        is_grouped_sum = is_grouped and group in ['선진국', '금']
+        
+        if is_grouped_sum:
+            # 그룹 합산 비중 (선진국, 금)
             group_target_value = group_target_values.get(group, 0)
             if info.get('is_new', False):
                 # 신규 종목: 그룹 목표 금액에서 기존 보유 종목 평가액을 뺀 금액
@@ -267,7 +285,7 @@ if st.session_state.total_balance > 0:
                 # 기존 보유 종목: 현재 보유 평가액 표시
                 target_value = current_holding * price if price > 0 else 0
         else:
-            # 단일 종목은 그대로
+            # 개별 비중 (신흥국, 미국 국채, 단일 종목 등)
             target_value = total_balance * weight_value
         
         # 계산된 수량
@@ -386,20 +404,20 @@ if st.session_state.total_balance > 0:
         group_tickers = weight_groups.get(group, [])
         is_grouped = len(group_tickers) > 1
         
-        # 비중 업데이트 (그룹 내 첫 번째 종목만 수정 가능, 두 종목 합산이 그룹 비중)
+        # 비중 업데이트
         new_weight = row['비중 조절 가능'] / 100.0  # 퍼센트를 소수로 변환
-        if is_grouped:
-            # 그룹의 첫 번째 티커인 경우만 비중 업데이트
-            # 이 비중은 그룹 전체 비중 (두 종목 합산 목표)
+        is_grouped_sum = is_grouped and group in ['선진국', '금']
+        
+        if is_grouped_sum:
+            # 그룹 합산 비중 (선진국, 금) - 그룹 내 첫 번째 종목만 수정 가능
             if ticker == group_tickers[0]:
                 st.session_state.adjustable_weights[ticker] = new_weight
                 # 그룹 내 다른 티커들은 0으로 설정 (그룹 비중은 첫 번째 티커에만 저장)
-                # 실제 계산 시 두 종목의 구매금액 합계가 이 비중에 맞춰짐
                 for t in group_tickers[1:]:
                     st.session_state.adjustable_weights[t] = 0.0
             # 그룹 내 두 번째 이후 종목의 비중 변경은 무시
-            # (첫 번째 종목의 비중이 그룹 전체 비중을 결정, 두 종목 합산 목표)
         else:
+            # 개별 비중 (신흥국, 미국 국채, 단일 종목 등) - 각 종목이 개별 비중
             st.session_state.adjustable_weights[ticker] = new_weight
         
         # 보유 수량 업데이트
@@ -449,7 +467,8 @@ if st.session_state.total_balance > 0:
         st.info("💡 **그룹별 합산**: 선진국(KODEX + ACE)과 금(TIGER + ACE)은 두 종목의 구매금액 합계가 목표 비중에 맞춰집니다.")
         group_summary_data = []
         for group, tickers in weight_groups.items():
-            if len(tickers) > 1:
+            # 그룹 합산 비중인 경우만 (선진국, 금)
+            if len(tickers) > 1 and group in ['선진국', '금']:
                 # 그룹 내 두 종목의 구매금액 합계
                 group_purchase = sum([
                     st.session_state.purchase_quantities.get(ticker, 0) * prices.get(ticker, 0)
