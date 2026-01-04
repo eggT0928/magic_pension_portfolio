@@ -28,8 +28,7 @@ st.markdown("""
 PORTFOLIO_CONFIG = {
     "위험자산": {
         "선진국": {
-            "KRX:379800": {"name": "KODEX 미국 S&P500TR(보수 0.0062%)", "weight": 0.24, "group": "선진국", "is_new": False},  # 기존 보유 (그룹 비중 24%)
-            "KRX:360200": {"name": "ACE 미국 S&P500TR(보수 0.0047%)", "weight": 0.0, "group": "선진국", "is_new": True},  # 신규 구매 (그룹 합산이므로 0)
+            "KRX:379800": {"name": "KODEX 미국 S&P500TR(보수 0.0062%)", "weight": 0.24, "group": "선진국", "is_new": False},
         },
         "신흥국": {
             "KRX:294400": {"name": "KOSEF 200TR", "weight": 0.08, "group": "신흥국", "is_new": False},
@@ -38,8 +37,7 @@ PORTFOLIO_CONFIG = {
         }
     },
     "대체 투자": {
-        "KRX:0072R0": {"name": "TIGER KRX금현물(2025.6.12.신규상장 보수 0.15%)", "weight": 0.0, "group": "금", "is_new": True},  # 신규 구매 (그룹 합산이므로 0)
-        "KRX:411060": {"name": "ACE KRX금현물(보수 0.19%)", "weight": 0.19, "group": "금", "is_new": False}, # 기존 보유 (그룹 비중 19%)
+        "KRX:411060": {"name": "ACE KRX금현물(보수 0.19%)", "weight": 0.19, "group": "금", "is_new": False},
     },
     "안전자산": {
         "한국 국채": {
@@ -55,8 +53,8 @@ PORTFOLIO_CONFIG = {
     }
 }
 
-# 그룹 합산 비중이 필요한 그룹 (두 종목 합계가 그룹 비중)
-GROUP_SUM_GROUPS = ['선진국', '금']
+# 그룹 합산 비중 로직 제거 - 모든 종목을 개별 비중으로 처리
+GROUP_SUM_GROUPS = []
 
 # 모든 티커 리스트 추출
 def get_all_tickers():
@@ -150,33 +148,9 @@ if 'adjustable_weights' not in st.session_state:
     st.session_state.adjustable_weights = {}
 
 # 모든 티커의 비중이 설정되어 있는지 확인하고, 없으면 기본값으로 설정
-# 그룹별 티커 리스트 생성 (초기화용)
-group_tickers_init = get_group_tickers()
-
 for ticker, info in PORTFOLIO_FLAT.items():
     if ticker not in st.session_state.adjustable_weights:
-        group = info['group']
-        tickers_in_group = group_tickers_init.get(group, [])
-        is_group_sum = group in GROUP_SUM_GROUPS and len(tickers_in_group) > 1
-        
-        if is_group_sum:
-            # 그룹 합산 비중인 경우, 그룹 내 첫 번째 종목만 그룹 비중을 가지고, 두 번째 종목은 0
-            if ticker == tickers_in_group[0]:
-                st.session_state.adjustable_weights[ticker] = info['weight']
-            else:
-                st.session_state.adjustable_weights[ticker] = 0.0
-        else:
-            # 개별 비중인 경우, 각 종목의 weight 사용
-            st.session_state.adjustable_weights[ticker] = info['weight']
-    elif st.session_state.adjustable_weights[ticker] == 0:
-        # 이미 0으로 설정된 경우는 그대로 유지 (그룹 합산 비중의 두 번째 종목)
-        group = info['group']
-        tickers_in_group = group_tickers_init.get(group, [])
-        is_group_sum = group in GROUP_SUM_GROUPS and len(tickers_in_group) > 1
-        
-        if not is_group_sum:
-            # 개별 비중인 경우에만 기본값으로 설정
-            st.session_state.adjustable_weights[ticker] = info['weight']
+        st.session_state.adjustable_weights[ticker] = info['weight']
 
 if 'purchase_quantities' not in st.session_state:
     st.session_state.purchase_quantities = {ticker: 0 for ticker in ALL_TICKERS}
@@ -237,26 +211,7 @@ if st.session_state.total_balance > 0:
     # 그룹별 티커 리스트
     group_tickers = get_group_tickers()
     
-    # 그룹별 목표 금액 및 기존 보유 평가액 계산 (그룹 합산 비중인 경우만)
-    group_target_values = {}
-    group_old_holdings_values = {}
-    
-    # 그룹별 목표 금액 (그룹 합산 비중인 경우만) 및 기존 보유 종목 평가액 합산
-    for group, tickers in group_tickers.items():
-        if group in GROUP_SUM_GROUPS and len(tickers) > 1:
-            # 그룹의 전체 목표 비중은 첫 번째 종목의 조정된 비중을 사용
-            first_ticker_in_group = tickers[0]
-            group_total_weight = st.session_state.adjustable_weights.get(first_ticker_in_group, PORTFOLIO_FLAT[first_ticker_in_group]['weight']) # 조정된 weight 사용
-            group_target_values[group] = total_balance * group_total_weight
-            
-            # is_new가 False인 종목(기존 보유)들의 현재 평가액 합계
-            group_old_value = 0
-            for ticker_in_group in tickers:
-                if not PORTFOLIO_FLAT[ticker_in_group].get('is_new', False):
-                    group_old_value += st.session_state.holdings.get(ticker_in_group, 0) * prices.get(ticker_in_group, 0)
-            group_old_holdings_values[group] = group_old_value
-    
-    # 테이블 데이터 생성
+    # 테이블 데이터 생성 (모든 종목을 개별 비중으로 처리)
     table_data = []
     
     for ticker in ALL_TICKERS:
@@ -264,34 +219,13 @@ if st.session_state.total_balance > 0:
         price = prices.get(ticker, 0)
         current_holding = st.session_state.holdings.get(ticker, 0)
         group = info['group']
-        tickers_in_group = group_tickers.get(group, [])
-        is_group_sum = group in GROUP_SUM_GROUPS and len(tickers_in_group) > 1
         
-        # 비중 계산 (표시용 및 계산용)
-        if is_group_sum:
-            # 그룹 합산 비중 - 그룹의 전체 목표 비중 (첫 번째 종목의 조정된 weight 사용)
-            first_ticker_in_group = tickers_in_group[0]
-            weight_value = st.session_state.adjustable_weights.get(first_ticker_in_group, PORTFOLIO_FLAT[first_ticker_in_group]['weight']) # 조정된 weight 사용
-        else:
-            # 개별 비중 - 각 종목의 조정된 weight 사용
-            weight_value = st.session_state.adjustable_weights.get(ticker, info['weight']) # 조정된 weight 사용
+        # 비중 계산 - 각 종목의 조정된 weight 사용
+        weight_value = st.session_state.adjustable_weights.get(ticker, info['weight'])
         
-        # 총자산 분배 계산
-        if is_group_sum:
-            # 그룹 합산 비중 (선진국, 금)
-            group_target_value = group_target_values.get(group, 0)
-            group_old_value = group_old_holdings_values.get(group, 0)
-            
-            if info.get('is_new', False):
-                # 신규 종목: 그룹 목표 금액에서 기존 보유 종목 평가액을 뺀 금액
-                target_value = max(0, group_target_value - group_old_value)
-            else:
-                # 기존 보유 종목: 현재 보유 평가액을 그대로 표시 (스프레드시트와 일치)
-                target_value = current_holding * price if price > 0 else 0
-        else:
-            # 개별 비중 (신흥국, 미국 국채, 한국 국채, 현금성 자산)
-            # 총자산 분배 = 총자산 × 비중
-            target_value = total_balance * weight_value if total_balance > 0 and weight_value > 0 else 0
+        # 총자산 분배 계산 - 모든 종목을 개별 비중으로 처리
+        # 총자산 분배 = 총자산 × 비중
+        target_value = total_balance * weight_value if total_balance > 0 and weight_value > 0 else 0
         
         # 계산된 수량
         calculated_quantity = target_value / price if price > 0 else 0
@@ -344,10 +278,9 @@ if st.session_state.total_balance > 0:
     """, unsafe_allow_html=True)
     
     st.info("""
-    💡 **그룹별 합산 비중 안내**:
-    - **선진국 (24%)**: KODEX S&P500(기존 보유) + ACE S&P500(신규 구매) = 두 종목 합계 24%
-    - **금 (19%)**: TIGER 금(기존 보유) + ACE 금(신규 구매) = 두 종목 합계 19%
-    - 기존 보유 종목의 현재 평가액을 제외한 나머지 금액을 신규 종목으로 구매하세요.
+    💡 **자산 배분 안내**:
+    - 모든 종목은 개별 비중으로 계산됩니다.
+    - 각 종목의 비중을 조절하여 전체 비중이 100%가 되도록 관리하세요.
     """)
     
     # 컬럼 설정
@@ -361,7 +294,7 @@ if st.session_state.total_balance > 0:
             max_value=100.0,
             step=0.1,
             format="%.1f",
-            help="⚠️ 그룹별 비중: 그룹 내 첫 번째 종목만 수정하세요! (선진국 24%, 금 19% - 두 종목 합계)"
+            help="각 종목의 비중을 조절할 수 있습니다. 전체 비중이 100%가 되도록 관리하세요."
         ),
         "총자산 분배": st.column_config.NumberColumn("총자산 분배 (원)", format="%d", disabled=True),
         "현재가(실시간)": st.column_config.NumberColumn("현재가 (원)", format="%d", disabled=True),
@@ -408,22 +341,10 @@ if st.session_state.total_balance > 0:
     for idx, row in edited_df.iterrows():
         ticker = row['티커']
         info = PORTFOLIO_FLAT[ticker]
-        group = info['group']
-        tickers_in_group = group_tickers.get(group, [])
-        is_group_sum = group in GROUP_SUM_GROUPS and len(tickers_in_group) > 1
         
-        # 비중 업데이트
+        # 비중 업데이트 - 모든 종목을 개별 비중으로 처리
         new_weight = row['비중 조절 가능'] / 100.0
-        if is_group_sum:
-            # 그룹 합산 비중 - 그룹 내 첫 번째 종목만 수정 가능
-            if ticker == tickers_in_group[0]:
-                st.session_state.adjustable_weights[ticker] = new_weight
-                # 그룹 내 다른 티커들은 0으로 설정
-                for t in tickers_in_group[1:]:
-                    st.session_state.adjustable_weights[t] = 0.0
-        else:
-            # 개별 비중 - 각 종목이 개별 비중
-            st.session_state.adjustable_weights[ticker] = new_weight
+        st.session_state.adjustable_weights[ticker] = new_weight
         
         # 보유 수량 업데이트
         st.session_state.holdings[ticker] = int(row['보유 수량'])
@@ -461,43 +382,6 @@ if st.session_state.total_balance > 0:
     with col4:
         st.metric("수익률", f"{profit_rate:.2f}%")
     
-    # 그룹별 구매금액 합계 확인
-    if group_target_values:
-        st.markdown("---")
-        st.subheader("📊 그룹별 구매금액 합계 확인")
-        st.info("💡 **그룹별 합산**: 선진국(KODEX + ACE)과 금(TIGER + ACE)은 두 종목의 구매금액 합계가 목표 비중에 맞춰집니다.")
-        group_summary_data = []
-        for group, tickers in group_tickers.items():
-            if group in GROUP_SUM_GROUPS and len(tickers) > 1:
-                # 그룹 내 두 종목의 구매금액 합계
-                group_purchase = sum([
-                    st.session_state.purchase_quantities.get(ticker, 0) * prices.get(ticker, 0)
-                    for ticker in tickers
-                    if prices.get(ticker, 0) and prices.get(ticker, 0) > 0
-                ])
-                group_target_value = group_target_values.get(group, 0)
-                group_target_weight = group_target_value / total_balance * 100 if total_balance > 0 else 0
-                group_actual_weight = group_purchase / total_balance * 100 if total_balance > 0 else 0
-                
-                # 각 종목별 구매금액
-                ticker_details = []
-                for ticker in tickers:
-                    ticker_purchase = st.session_state.purchase_quantities.get(ticker, 0) * prices.get(ticker, 0) if prices.get(ticker, 0) else 0
-                    ticker_details.append(f"{PORTFOLIO_FLAT[ticker]['name']}: ₩{ticker_purchase:,.0f}")
-                
-                group_summary_data.append({
-                    "그룹": group,
-                    "목표 비중": f"{group_target_weight:.2f}%",
-                    "목표 금액": f"₩ {group_target_value:,.0f}",
-                    "실제 구매금액 합계": f"₩ {group_purchase:,.0f}",
-                    "실제 비중": f"{group_actual_weight:.2f}%",
-                    "차이": f"₩ {group_purchase - group_target_value:,.0f}",
-                    "종목별 내역": " + ".join(ticker_details)
-                })
-        
-        if group_summary_data:
-            df_group_summary = pd.DataFrame(group_summary_data)
-            st.dataframe(df_group_summary, width='stretch', hide_index=True)
 
 else:
     st.info("👈 위에서 총 자산을 입력하고 '가격 조회' 버튼을 클릭하세요.")
@@ -509,22 +393,17 @@ else:
     2. **원금 입력**: 초기 투자금을 입력하세요.
     3. **가격 조회**: '가격 조회' 버튼을 클릭하여 현재 가격을 조회합니다.
     4. **테이블에서 직접 입력**: 
-       - **비중 조절 가능**: 그룹별 비중을 조절합니다 (그룹 내 첫 번째 종목만 수정)
+       - **비중 조절 가능**: 각 종목의 비중을 조절합니다 (전체 비중이 100%가 되도록 관리)
        - **구매할 수량 입력**: 실제 구매할 수량을 입력합니다
        - **보유 수량**: 현재 보유 수량을 입력합니다
     5. **자동 계산**: 입력하면 즉시 계산이 반영됩니다.
     
     ### 포트폴리오 구성
     
-    - **위험자산 (67%)**: 선진국 24% (KODEX + ACE S&P500), 신흥국 8%씩 3개
-    - **대체 투자 (19%)**: 금 (TIGER + ACE 금)
-    - **안전자산 (33%)**: 한국 국채 14%, 미국 국채 7%씩 2개
-    - **현금성 자산 (5%)**: TIGER KOFR금리액티브
+    - **위험자산 (48%)**: 선진국 24% (KODEX S&P500), 신흥국 8%씩 3개 (한국, 중국, 인도)
+    - **대체 투자 (19%)**: 금 19% (ACE KRX금현물)
+    - **안전자산 (28%)**: 한국 국채 14%, 미국 국채 7%씩 2개 (10년물, 30년 액티브)
+    - **현금성 자산 (5%)**: TIGER KOFR금리액티브 5%
     
-    ### 참고사항
-    
-    - **선진국 (S&P500)**: KODEX는 기존 보유, ACE는 신규 구매 (보수 낮음)
-    - **금**: ACE는 기존 보유, TIGER는 신규 구매 (보수 낮음)
-    - 그룹별 비중은 그룹 내 첫 번째 종목의 비중을 수정하면 전체 그룹 비중이 변경됩니다.
-    - 기존 보유 종목의 현재 평가액을 자동으로 계산하고, 목표 비중에서 이를 차감하여 신규 종목에 배분합니다.
+    **총 비중: 24 + 24 + 19 + 14 + 14 + 5 = 100%**
     """)
